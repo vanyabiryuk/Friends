@@ -5,9 +5,13 @@
 //  Created by Vanüsha on 19.07.2022.
 //
 
+import CoreData
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.managedObjectContext) var managedObjectContext
+    @FetchRequest(sortDescriptors: []) var cachedUsers: FetchedResults<CachedUser>
+    
     @State private var users: [User] = []
     
     var body: some View {
@@ -27,15 +31,32 @@ struct ContentView: View {
             .navigationTitle("Friends")
         }
         .task {
+            await MainActor.run {
+                var newUsers: [User] = []
+                for user in cachedUsers {
+                    let newUser = User(id: user.wrappedID,
+                                       isActive: user.isActive,
+                                       name: user.wrappedName,
+                                       age: user.wrappedAge,
+                                       company: user.wrappedCompany,
+                                       email: user.wrappedEmail,
+                                       address: user.wrappedAddress,
+                                       about: user.wrappedAbout,
+                                       registered: user.wrappedRegistered,
+                                       tags: user.wrappedTags,
+                                       friends: user.wrappedFriends)
+                    newUsers.append(newUser)
+                }
+                
+                users = newUsers
+            }
+            
             await loadUsers()
         }
     }
     
     func loadUsers() async {
-        guard users.isEmpty else {
-            print("Users are already loaded")
-            return
-        }
+        guard users.isEmpty else { return }
         
         guard let url = URL(string: "https://www.hackingwithswift.com/samples/friendface.json")
         else {
@@ -52,5 +73,28 @@ struct ContentView: View {
         } catch {
             print("Couldn't create users' array \(error.localizedDescription)")
         }
+        
+        for user in users {
+            let cachedUser = CachedUser(context: managedObjectContext)
+            cachedUser.id = user.id
+            cachedUser.isActive = user.isActive
+            cachedUser.name = user.name
+            cachedUser.age = Int16(user.age)
+            
+            cachedUser.tags = user.tags.joined(separator: ";")
+            var friends: [CachedFriend] = []
+            
+            for friend in user.friends {
+                let newFriend = CachedFriend(context: managedObjectContext)
+                newFriend.id = friend.id
+                newFriend.name = friend.name
+                newFriend.users = cachedUser
+                friends.append(newFriend)
+            }
+            
+            cachedUser.friends = NSSet(array: friends)
+        }
+        
+        try? managedObjectContext.save()
     }
 }
